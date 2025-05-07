@@ -1,0 +1,10 @@
+runtime: python310
+
+# gunicorn is google's production flask server for the app.
+# I put -t 0 there to avoid timeouts if the app takes some time for the pubmed query.
+entrypoint: gunicorn -t 0 -b :$PORT main:app
+
+# this just means that any request goes through main.py and index.html
+handlers:
+- url: /.*
+  script: auto

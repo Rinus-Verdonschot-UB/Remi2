@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Contact - REMI 2.0</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<nav>
+    <div class="nav-links">
+        <a href="/" class="{% if request.path == '/' %}active{% endif %}">Home</a>
+        <a href="/keyword_search" class="{% if request.path == '/keyword_search' %}active{% endif %}">Keyword Search</a>
+        <a href="/multiple_search" class="{% if request.path == '/multiple_search' %}active{% endif %}">Proximity Search</a>
+        <a href="/contact" class="{% if request.path == '/contact' %}active{% endif %}">Contact</a>
+    </div>
+    <div class="logo">REMI 2.0</div>
+</nav>
+
+<div class="container">
+    <div class="left-panel" style="width: 100%; max-width: 700px; margin: auto;">
+        <h2>Contact</h2>
+        <p>📧 Email us at: <a href="mailto:ub-sysrev@maastrichtuniversity.nl">ub-sysrev@maastrichtuniversity.nl</a></p>
+        <p>🔗 Visit: <a href="https://library.maastrichtuniversity.nl/research/research-essentials/literature-search-systematic-reviews/" target="_blank">Maastricht University Library – Systematic Reviews</a></p>
+        <div style="margin-top: 30px; text-align: center;">
+            <a href="https://library.maastrichtuniversity.nl/" target="_blank">
+                <img src="{{ url_for('static', filename='UMlibrarywebsite.webp') }}" 
+                     alt="University Library Logo" 
+                     style="max-width: 300px; width: 100%; height: auto;">
+            </a>
+        </div>                          
+    </div>
+</div>
+
+<footer>
+    <div class="footer-center">Related Expression Machine Identification (REMI 2.0) - by University Library Maastricht - 2025</div>
+    <div class="footer-session">Session ID: {{ session_id }}</div>
+    <div class="footer-mobile">REMI 2.0 (2025) by UM</div>
+</footer>
+
+</body>
+</html>

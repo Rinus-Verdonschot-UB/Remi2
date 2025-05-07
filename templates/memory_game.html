@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>REMI 2.0 Memory Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #e3f2fd;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+
+        h2 {
+            margin-bottom: 10px;
+        }
+
+        #timer {
+            font-size: 18px;
+            margin-bottom: 20px;
+        }
+
+        .game-board {
+            display: grid;
+            grid-template-columns: repeat(5, 100px);
+            grid-gap: 15px;
+            justify-content: center;
+        }
+
+        .card {
+            width: 100px;
+            height: 100px;
+            border-radius: 8px;
+            cursor: pointer;
+            background-color: white;
+            box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);
+            position: relative;
+            perspective: 1000px;
+        }
+
+        .card-inner {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            transition: transform 0.5s;
+            transform-style: preserve-3d;
+        }
+
+        .card.flipped .card-inner {
+            transform: rotateY(180deg);
+        }
+
+        .card-front, .card-back {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            backface-visibility: hidden;
+            border-radius: 8px;
+        }
+
+        .card-front {
+            background-color: #1565c0;
+        }
+
+        .card-back img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .card-back {
+            transform: rotateY(180deg);
+        }
+
+        #win-message {
+            margin-top: 20px;
+            font-size: 20px;
+            font-weight: bold;
+            color: green;
+        }
+
+        button#restart-btn {
+            margin-top: 20px;
+            padding: 8px 16px;
+            font-size: 16px;
+            border: none;
+            background-color: #1565c0;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button#restart-btn:hover {
+            background-color: #0d47a1;
+        }
+    </style>
+</head>
+<body>
+
+<h2>🧠 REMI 2.0 Memory Game</h2>
+<div id="timer">Time: 0s</div>
+<div class="game-board" id="gameBoard"></div>
+<div id="win-message"></div>
+<button id="restart-btn" style="display:none;">Play Again</button>
+
+<script>
+    const imagePaths = Array.from({ length: 10 }, (_, i) => `/static/Game${i + 1}.jpg`);
+    let cards = [];
+    let firstCard = null;
+    let secondCard = null;
+    let lockBoard = false;
+    let matches = 0;
+    let startTime;
+    let timerInterval;
+
+    function startTimer() {
+        startTime = Date.now();
+        timerInterval = setInterval(() => {
+            const seconds = Math.floor((Date.now() - startTime) / 1000);
+            document.getElementById("timer").textContent = `Time: ${seconds}s`;
+        }, 1000);
+    }
+
+    function stopTimer() {
+        clearInterval(timerInterval);
+    }
+
+    function shuffle(array) {
+        return array.sort(() => 0.5 - Math.random());
+    }
+
+    function createBoard() {
+        const board = document.getElementById("gameBoard");
+        board.innerHTML = '';
+        const doubled = [...imagePaths, ...imagePaths];
+        const shuffled = shuffle(doubled);
+
+        shuffled.forEach((imgPath, index) => {
+            const card = document.createElement("div");
+            card.className = "card";
+            card.dataset.image = imgPath;
+
+            card.innerHTML = `
+                <div class="card-inner">
+                    <div class="card-front"></div>
+                    <div class="card-back"><img src="${imgPath}" alt="Game image"></div>
+                </div>
+            `;
+
+            card.addEventListener("click", () => flipCard(card));
+            board.appendChild(card);
+        });
+
+        matches = 0;
+        lockBoard = false;
+        firstCard = null;
+        secondCard = null;
+        document.getElementById("win-message").textContent = '';
+        document.getElementById("restart-btn").style.display = 'none';
+        document.getElementById("timer").textContent = "Time: 0s";
+        startTimer();
+    }
+
+    function flipCard(card) {
+        if (lockBoard || card === firstCard || card.classList.contains("flipped")) return;
+
+        card.classList.add("flipped");
+
+        if (!firstCard) {
+            firstCard = card;
+        } else {
+            secondCard = card;
+            lockBoard = true;
+
+            if (firstCard.dataset.image === secondCard.dataset.image) {
+                matches += 1;
+                firstCard = null;
+                secondCard = null;
+                lockBoard = false;
+
+                if (matches === 10) {
+                    stopTimer();
+                    const finalTime = Math.floor((Date.now() - startTime) / 1000);
+                    document.getElementById("win-message").textContent = `🎉 You matched all pairs in ${finalTime} seconds!`;
+                    document.getElementById("restart-btn").style.display = 'inline-block';
+                }
+            } else {
+                setTimeout(() => {
+                    firstCard.classList.remove("flipped");
+                    secondCard.classList.remove("flipped");
+                    firstCard = null;
+                    secondCard = null;
+                    lockBoard = false;
+                }, 1000);
+            }
+        }
+    }
+
+    document.getElementById("restart-btn").addEventListener("click", createBoard);
+
+    // Start the game when the page loads
+    window.onload = createBoard;
+</script>
+
+</body>
+</html>

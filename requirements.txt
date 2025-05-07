@@ -1,0 +1,8 @@
+# This file tells the server (gunicorn) all the requirements (so which packages the python script needs installing).
+Flask==3.0.3
+gunicorn==20.1.0
+requests==2.32.3
+pandas==2.2.2	
+metapub==0.5.9
+Werkzeug==3.0.3
+eutils==0.6.0

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Keyword Variant Search</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        #scroll-to-top {
+            position: fixed;
+            bottom: 40px;
+            right: 30px;
+            z-index: 100;
+            background-color: #1565c0;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            padding: 12px 16px;
+            font-size: 18px;
+            cursor: pointer;
+            display: none;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+
+        #scroll-to-top:hover {
+            background-color: #0d47a1;
+        }
+
+        .variant-list {
+            margin-top: 20px;
+        }
+
+        .variant-controls {
+            margin-top: 15px;
+        }
+
+        .variant-controls button {
+            margin-right: 10px;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        li {
+            margin-bottom: 5px;
+        }
+
+        .group-heading {
+            margin-top: 15px;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        #funny-loading {
+            margin-top: 15px;
+            font-style: italic;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<nav>
+    <div class="nav-links">
+        <a href="/" class="{% if request.path == '/' %}active{% endif %}">Home</a>
+        <a href="/keyword_search" class="{% if request.path == '/keyword_search' %}active{% endif %}">Keyword Search</a>
+        <a href="/multiple_search" class="{% if request.path == '/multiple_search' %}active{% endif %}">Proximity Search</a>
+        <a href="/contact" class="{% if request.path == '/contact' %}active{% endif %}">Contact</a>
+    </div>
+    <div class="logo">REMI 2.0</div>
+</nav>
+
+<div class="container">
+    <div class="left-panel" style="width: 100%; max-width: 700px; margin: auto;">
+        <h2>Keyword Variant Search</h2>
+        <label>Enter Term:</label>
+        <input type="text" id="keyword" placeholder="e.g. canc*">
+
+        <label>From:</label>
+        <input type="date" id="date_from">
+
+        <label>To:</label>
+        <input type="date" id="date_to">
+
+        <label>
+            <input type="checkbox" id="exclude_hyphens" name="exclude_hyphens" value="true">
+            Exclude Hyphenated Words
+            <span style="cursor: help; color: #1565c0;" title="Omits hyphenated variants like cancer-related. Keeps the prefix (e.g. 'cancer') if not already found.">🛈</span>
+        </label>        
+
+        <button id="search" class="button-primary">Find Variants</button>
+        <button id="clear-inputs">Clear Input</button>
+        <button id="clear-variants">Clear Variants</button>
+
+        <div id="funny-loading"></div>
+
+        <div class="variant-controls" style="display:none;" id="variant-buttons">
+            <button id="toggle-select-all">Select/Unselect All</button>
+            <button id="copy-selected">Copy Selected</button>
+            <span id="copy-confirmation" style="display:none; color: green; margin-left: 10px;">✅ Copied!</span>
+            <button id="export-selected">Export Selected to CSV</button>
+        </div>
+
+        <div id="results" class="variant-list"></div>
+    </div>
+</div>
+
+<footer>
+    <div class="footer-center">Related Expression Machine Identification (REMI 2.0) - by University Library Maastricht - 2025</div>
+    <div class="footer-session">Session ID: {{ session_id }}</div>
+    <div class="footer-mobile">REMI 2.0 © 2025</div>
+</footer>
+
+<!-- Scroll-to-top button -->
+<button id="scroll-to-top" title="Back to Top">⬆️</button>
+
+<script>
+$(document).ready(function() {
+    const funnyMessages = [
+    "Finding your stuff...",
+    "Solving world peace...",    
+    "Inventing the wheel...",
+    "Counting stars...",
+    "Cooking your breakfast...",
+    "Walking the dog...",
+    "Debugging the Matrix...",
+    "Talking to PubMed elves...",
+    "Tuning the algorithm...",
+    "Whispering to AI overlords...",
+    "Training unicorns...",
+    "Loading caffeine...",
+    "Polishing your results...",
+    "Petting Schrödinger's cat...",
+    "Convincing the server...",
+    "Interpreting ancient manuscripts...",
+    "Negotiating with spiders...",
+    "Unpacking quantum entanglements..."
+    ];
+    let funnyInterval;
+
+    $('#clear-inputs, #clear-variants').hide(); 
+
+    function startFunnyMessages() {
+        $('#funny-loading').text(funnyMessages[Math.floor(Math.random() * funnyMessages.length)]);
+        funnyInterval = setInterval(() => {
+            $('#funny-loading').fadeOut(400, function () {
+                $(this).text(funnyMessages[Math.floor(Math.random() * funnyMessages.length)]).fadeIn(400);
+            });
+        }, 2000);
+    }
+
+    function stopFunnyMessages() {
+        clearInterval(funnyInterval);
+        $('#funny-loading').fadeOut(400, function () {
+            $(this).text('').show();
+        });
+    }
+
+    $('#search').click(function() {
+        $('#results').empty();
+        $('#variant-buttons').hide();        
+        const term = $('#keyword').val().trim();
+        const date_from = $('#date_from').val();
+        const date_to = $('#date_to').val();
+        const exclude_hyphens = $('#exclude_hyphens').is(':checked');
+
+        if (!term) {
+            alert("Enter a term first.");
+            return;
+        }
+                
+        $('#variant-buttons').hide();
+        startFunnyMessages();
+
+        $.ajax({
+            type: 'POST',
+            url: '/get_keyword_variants',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                term: term,
+                date_from: date_from,
+                date_to: date_to,
+                exclude_hyphens: exclude_hyphens
+            }),
+            success: function(response) {
+                stopFunnyMessages();
+            
+                const keywords = response.variants || response;  // handle both { variants: [...] } and legacy [...]
+            
+                if (!keywords.length) {
+                    $('#results').html("<p>No variants found.</p>");
+                    return;
+                }
+            
+                const term = $('#keyword').val().trim();
+                const root = term.replace('*', '').toLowerCase();
+                let grouped = {};
+                keywords.forEach(kw => {
+                    const group = kw.word.startsWith(root) ? root : 'Other';
+                    if (!grouped[group]) grouped[group] = [];
+                    grouped[group].push(kw);
+                });
+            
+                let html = `<h3>Found ${keywords.length} variants for "${term}":</h3>`;
+                for (let group in grouped) {
+                    html += `<div class="group-heading">${group}</div><ul>`;
+                    grouped[group].forEach(kw => {
+                        html += `<li><label><input type="checkbox" class="variant-checkbox" value="${kw.word}" data-count="${kw.count}"> ${kw.word} (${kw.count})</label></li>`;
+                    });
+                    html += "</ul>";
+                }
+            
+                $('#results').html(html);
+                $('#variant-buttons').show();
+                $('#clear-variants').show();
+                $('#clear-inputs').show();
+            },
+            error: function(xhr) {
+                stopFunnyMessages();
+                let errorMsg = "<p style='color:red;'>❌ An error occurred while fetching variants.</p>";
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    if (response.error) {
+                        errorMsg += `<p style='color:#c62828;'>${response.error}</p>`;
+                    }
+            
+                    if (response.partial_results && response.partial_results.length) {
+                        errorMsg += `<p>Partial results before error:</p><ul>`;
+                        response.partial_results.forEach(kw => {
+                            errorMsg += `<li><label><input type="checkbox" class="variant-checkbox" value="${kw.word}" data-count="${kw.count}"> ${kw.word} (${kw.count})</label></li>`;
+                        });
+                        errorMsg += "</ul>";
+                        $('#variant-buttons').show();
+                    }
+                } catch (e) {
+                    errorMsg += `<p>Could not parse error response.</p>`;
+                }
+            
+                $('#results').html(errorMsg);
+                $('#clear-inputs').show();
+                $('#clear-variants').show();
+            }            
+        });
+    });
+
+    $('#clear-variants').click(function() {
+        $('#results').empty();
+        $('#variant-buttons').hide();
+        $('#clear-variants').hide();
+    });
+
+    $('#clear-inputs').click(function() {
+        $('#keyword').val('');
+        $('#date_from').val('');
+        $('#date_to').val('');
+        $('#exclude_hyphens').prop('checked', false);
+        $('#clear-inputs').hide();
+    });
+
+    $('#toggle-select-all').click(function() {
+        const checkboxes = $('.variant-checkbox');
+        const allChecked = checkboxes.length === checkboxes.filter(':checked').length;
+        checkboxes.prop('checked', !allChecked);
+    });
+
+    $('#copy-selected').click(function() {
+        const selected = $('.variant-checkbox:checked').map((_, el) => el.value).get();
+        if (!selected.length) return alert("No variants selected.");
+        navigator.clipboard.writeText(selected.map(word => word.replace(' [+hyphen]', '')).join("\n")).then(() => {
+            $('#copy-confirmation').fadeIn().delay(2000).fadeOut();
+        });
+    });
+
+    $('#export-selected').click(function() {
+        const selected = [];
+        $('.variant-checkbox:checked').each(function() {
+            const word = $(this).val();
+            const count = $(this).attr('data-count') || '0';
+            selected.push([word.replace(' [+hyphen]', ''), count]);
+        });
+
+        if (!selected.length) return alert("No variants selected.");
+
+        let csv = "Variant,Frequency\n";
+        selected.forEach(([word, count]) => {
+            csv += `"${word}",${count}\n`;
+        });
+
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "selected_variants.csv";
+        link.click();
+    });
+
+    $(window).scroll(function() {
+        $('#scroll-to-top').toggle($(this).scrollTop() > 300);
+    });
+
+    $('#scroll-to-top').click(function() {
+        $('html, body').animate({ scrollTop: 0 }, 600);
+        return false;
+    });
+});
+</script>
+
+</body>
+</html>
