@@ -25,7 +25,7 @@ spec:
           - "4"                # 4 threads per worker
           - "--timeout"
           - "300"              # 5 minutes max request time
-          - "app.main:app"
+          - "main:app"
         ports:
         - containerPort: 8080
         resources:
