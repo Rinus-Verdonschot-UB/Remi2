@@ -1,0 +1,12 @@
+# flask-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: remi2-service
+spec:
+  selector:
+    app: remi2-app  # must match your pod/deployment label
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080

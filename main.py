@@ -14,12 +14,13 @@ import threading
 from functools import wraps
 import logging
 from collections import defaultdict
-import config  # this loads config.py
 
-# set-up the secret keys.
+
 app = Flask(__name__)
-app.config['SECRET_KEY'] = config.SECRET_KEY
-os.environ['NCBI_API_KEY'] = config.NCBI_API_KEY
+app.config['SECRET_KEY'] = 'secret!'
+
+# Set PubMed API key
+os.environ['NCBI_API_KEY'] = "1f79a0475dc60200a4870ac3d46ad3905008"
 
 # Global query throttle
 QUERY_LOCK = threading.Lock()
@@ -144,35 +145,8 @@ def rate_limited_request(fn):
     return wrapper
 
 def format_terms(terms):
-    # Match either quoted phrases or single terms
-    pattern = r'"[^"]+"|\S+'
-    parts = re.findall(pattern, terms)
-    clean_parts = []
-    buffer = []
-
-    for part in parts:
-        if part.lower() == 'or' and buffer:
-            clean_parts.append(' '.join(buffer))
-            buffer = []
-        else:
-            buffer.append(part)
-
-    if buffer:
-        clean_parts.append(' '.join(buffer))
-
-    formatted = []
-    for term in clean_parts:
-        stripped = term.strip()
-        if stripped.startswith('"') and stripped.endswith('"'):
-            # Already quoted exact phrase
-            formatted.append(f'{stripped}[tiab]')
-        else:
-            # Unquoted term or phrase, quote it first
-            if ' ' in stripped:
-                stripped = f'"{stripped}"'
-            formatted.append(f'{stripped}[tiab]')
-
-    return " OR ".join(formatted)
+    split_terms = re.split(r'\s+or\s+', terms, flags=re.I)
+    return " OR ".join([f'{term.strip()}[tiab]' for term in split_terms])
 
 def format_combined_query(term1, term2):
     return f"({format_terms(term1)}) AND ({format_terms(term2)})"
@@ -377,12 +351,12 @@ def find_keyword_variants(term, date_from=None, date_to=None, exclude_hyphens=Fa
 
 
 # ---------- COMBINED VARIANT LOGIC ----------
+
 def find_combined_variants(term1_query, term2_query, date_from=None, date_to=None, exclude_hyphens=False):
     variants = {'term1': {}, 'term2': {}}
     discovered_variants = {'term1': set(), 'term2': set()}
     raw_seen_prefixes = {'term1': set(), 'term2': set()}
     truncated_terms = {'term1': [], 'term2': []}
-    wildcard_seeds = {'term1': set(), 'term2': set()}  # ⬅️ key fix
 
     for key in ['term1', 'term2']:
         query_string = term1_query if key == 'term1' else term2_query
@@ -394,32 +368,21 @@ def find_combined_variants(term1_query, term2_query, date_from=None, date_to=Non
                 base = t.rstrip('*').lower()
                 variants[key][base] = Counter()
                 truncated_terms[key].append(base)
-                wildcard_seeds[key].add(t.lower())  # ⬅️ store exact seed
             else:
                 word = t.lower()
                 variants[key][word] = Counter({word: 9999})
                 discovered_variants[key].add(word)
-
+   
+    
     def format_truncated_only(query_string):
         terms = [t.strip() for t in re.split(r'\s+or\s+', query_string, flags=re.I) if t.strip()]
         return " OR ".join([f"{t}[tiab]" for t in terms])
 
+
     def build_exclusion_clause(all_discovered):
         if not all_discovered:
             return ""
-
-        clean_terms = []
-        for w in sorted(all_discovered):
-            clean = w.replace('__H__', '')
-            if clean.endswith('*'):
-                continue
-            if clean.startswith('"') and clean.endswith('"'):
-                clean = clean[1:-1]
-            clean_terms.append(f'"{clean}"[tiab]')
-
-        if not clean_terms:
-            return ""
-        return " NOT (" + " OR ".join(clean_terms) + ")"
+        return " NOT (" + " OR ".join([f'\"{w.replace("__H__", "")}\"[tiab]' for w in sorted(all_discovered)]) + ")"
 
     term1_base = format_truncated_only(term1_query)
     term2_base = format_truncated_only(term2_query)
@@ -442,41 +405,30 @@ def find_combined_variants(term1_query, term2_query, date_from=None, date_to=Non
                 text = article['full_text']
                 for key, term_list in [('term1', truncated_terms['term1']), ('term2', truncated_terms['term2'])]:
                     for base in term_list:
-                        base_norm = base.replace('*', '').lower()
-
-                        if ' ' in base:
-                            parts = base.split()
-                            if len(parts) == 2:
-                                prefix, wildcard = parts
-                                pattern = rf"\b{re.escape(prefix)}[-\s]+{re.escape(wildcard)}[\w-]*\b"
-                                matches = re.findall(pattern, text)
-                            else:
-                                matches = []
-                        else:
-                            pattern = rf"\b{re.escape(base)}[\w-]*\b"
-                            matches = re.findall(pattern, text)
-
+                        matches = re.findall(rf"\b{re.escape(base)}[\w-]*\b", text)
                         for match in matches:
                             match_lower = match.lower()
-                            match_norm = re.sub(r'[\s\-]+', ' ', match_lower.strip())
-
-                            # ⛔ skip if match is same as seed or wildcard
-                            if match_lower in wildcard_seeds[key]:
-                                continue
-                            if match_norm == base_norm:
-                                continue
-
                             is_hyphenated = '-' in match_lower
 
-                            if match_norm not in discovered_variants[key]:
-                                discovered_variants[key].add(match_norm)
-                                if is_hyphenated and exclude_hyphens:
-                                    handle_hyphen_variant(match_norm, raw_seen_prefixes[key], discovered_variants[key], variants[key][base])
+                            if not is_hyphenated:
+                                if match_lower not in discovered_variants[key]:
+                                    discovered_variants[key].add(match_lower)
+                                    raw_seen_prefixes[key].add(match_lower)
+                                    variants[key][base][match_lower] += 1
+                                    new_found = True
                                 else:
-                                    variants[key][base][match_norm] += 1
+                                    variants[key][base][match_lower] += 1
+
+                            elif exclude_hyphens:
+                                handle_hyphen_variant(match_lower, raw_seen_prefixes[key], discovered_variants[key], variants[key][base])
                                 new_found = True
                             else:
-                                variants[key][base][match_norm] += 1
+                                if match_lower not in discovered_variants[key]:
+                                    discovered_variants[key].add(match_lower)
+                                    variants[key][base][match_lower] += 1
+                                    new_found = True
+                                else:
+                                    variants[key][base][match_lower] += 1
 
         if not new_found:
             break
@@ -486,7 +438,6 @@ def find_combined_variants(term1_query, term2_query, date_from=None, date_to=Non
         iteration += 1
 
     return variants
-
 
 # ---------- ROUTES ----------
 
@@ -568,7 +519,12 @@ def search_stream():
 
         yield f"data: {json.dumps(results)}\n\n"
         yield "data: DONE\n\n"
-
+        
+    headers = {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    }    
     return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
 @app.route('/generate_proximity_search', methods=['POST'])
