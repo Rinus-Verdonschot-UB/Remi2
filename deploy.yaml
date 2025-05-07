@@ -15,6 +15,23 @@ spec:
       containers:
       - name: remi2-container
         image: python:3.10-slim
-        command: ["gunicorn", "-b", "0.0.0.0:8080", "app.main:app"]
+        command:
+          - gunicorn
+          - "-b"
+          - "0.0.0.0:8080"
+          - "-w"
+          - "2"                # 2 workers
+          - "--threads"
+          - "4"                # 4 threads per worker
+          - "--timeout"
+          - "300"              # 5 minutes max request time
+          - "app.main:app"
         ports:
         - containerPort: 8080
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
