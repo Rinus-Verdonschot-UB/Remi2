@@ -18,12 +18,15 @@ import logging
 from collections import defaultdict
 
 
+# Create a single shared Redis connection with decoding enabled
+redis_client = redis.StrictRedis(host='redis-service', port=6379, decode_responses=True)
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
 app.config['SESSION_TYPE'] = 'redis'
 app.config['SESSION_PERMANENT'] = False
 app.config['SESSION_USE_SIGNER'] = True
-app.config['SESSION_REDIS'] = redis.Redis(host='redis-service', port=6379, decode_responses=True)
+app.config['SESSION_REDIS'] = redis_client
 Session(app)
 
 # Set PubMed API key
@@ -46,7 +49,7 @@ def inject_session_id():
     return {'session_id': session.get('id', 'N/A')}
 
 alt_cache_dir = '/tmp/eutils_cache'
-user_progress = redis.Redis(host='redis-service', port=6379, decode_responses=True)
+user_progress = redis_client
 CACHE_DIR = '/tmp/eutils_cache'
 CACHE_MAX_AGE_DAYS = 30
 
@@ -494,8 +497,7 @@ def search():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/search_stream', methods=['GET'])
-def search_stream():
-    global progress
+def search_stream():    
 
     def generate():
         sid = session['id']
