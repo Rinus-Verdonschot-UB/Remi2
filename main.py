@@ -16,7 +16,7 @@ import threading
 from functools import wraps
 import logging
 from collections import defaultdict
-
+from flask.sessions import SecureCookieSessionInterface
 
 # Create a single shared Redis connection with decoding enabled
 redis_client = redis.StrictRedis(host='redis-service', port=6379, decode_responses=True)
@@ -28,6 +28,15 @@ app.config['SESSION_PERMANENT'] = False
 app.config['SESSION_USE_SIGNER'] = True
 app.config['SESSION_REDIS'] = redis_client
 Session(app)
+
+class ForceStrSessionInterface(SecureCookieSessionInterface):
+    def save_session(self, *args, **kwargs):
+        # Ensure session ID is always string (not bytes)
+        if isinstance(args[1].sid, bytes):
+            args[1].sid = args[1].sid.decode()
+        return super().save_session(*args, **kwargs)
+    
+app.session_interface = ForceStrSessionInterface()
 
 # Set PubMed API key
 os.environ['NCBI_API_KEY'] = "1f79a0475dc60200a4870ac3d46ad3905008"
