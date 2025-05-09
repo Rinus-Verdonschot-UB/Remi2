@@ -6,3 +6,5 @@ pandas==2.2.2
 metapub==0.5.9
 Werkzeug==3.0.3
 eutils==0.6.0
+Flask-Session==0.5.0
+redis==5.0.4

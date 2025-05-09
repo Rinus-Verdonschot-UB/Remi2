@@ -6,6 +6,8 @@ import re
 import os
 from collections import Counter
 from flask import Flask, request, render_template, jsonify, Response, stream_with_context, session
+from flask_session import Session
+import redis
 from metapub import PubMedFetcher
 import uuid
 from datetime import datetime, timedelta
@@ -18,6 +20,11 @@ from collections import defaultdict
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
+app.config['SESSION_TYPE'] = 'redis'
+app.config['SESSION_PERMANENT'] = False
+app.config['SESSION_USE_SIGNER'] = True
+app.config['SESSION_REDIS'] = redis.Redis(host='redis-service', port=6379, decode_responses=True)
+Session(app)
 
 # Set PubMed API key
 os.environ['NCBI_API_KEY'] = "1f79a0475dc60200a4870ac3d46ad3905008"
@@ -39,8 +46,7 @@ def inject_session_id():
     return {'session_id': session.get('id', 'N/A')}
 
 alt_cache_dir = '/tmp/eutils_cache'
-user_progress = {}  # session_id: { search_data..., 'last_seen': datetime }
-USER_TIMEOUT = timedelta(minutes=30)
+user_progress = redis.Redis(host='redis-service', port=6379, decode_responses=True)
 CACHE_DIR = '/tmp/eutils_cache'
 CACHE_MAX_AGE_DAYS = 30
 
@@ -48,17 +54,8 @@ CACHE_MAX_AGE_DAYS = 30
 def ensure_session_id():
     if 'id' not in session:
         session['id'] = str(uuid.uuid4())
-    print(f"[DEBUG] Active session ID: {session['id']}")
-    cleanup_old_sessions()
+    print(f"[DEBUG] Active session ID: {session['id']}")    
     cleanup_old_cache()
-
-def cleanup_old_sessions():
-    now = datetime.utcnow()
-    expired_ids = [sid for sid, entry in user_progress.items()
-                   if now - entry.get('last_seen', now) > USER_TIMEOUT]
-    for sid in expired_ids:
-        print(f"[DEBUG] Cleaning up expired session: {sid}")
-        del user_progress[sid]
 
 def cleanup_old_cache():
     now = time.time()
@@ -103,14 +100,12 @@ def find_precise_variants(term1_list, term2_list, date_from=None, date_to=None, 
 
             # ✅ Now update precise_progress — once per comparison (not per iteration)
             completed += 1
-            if session['id'] not in user_progress:
-                user_progress[session['id']] = {}
-
-            user_progress[session['id']]['precise_progress'] = {
+            sid = session['id']
+            user_progress.hset(f"user:{sid}", "precise_progress", json.dumps({
                 'current': completed,
                 'total': total,
                 'last_updated': datetime.utcnow().isoformat()
-            }
+            }))
 
     return all_variants
 
@@ -123,8 +118,6 @@ def handle_hyphen_variant(match_lower, raw_seen_prefixes, seen_variants, found_v
     else:
         raw_seen_prefixes.add(prefix)
         found_variants[prefix] += 1
-                
-progress = {}
 
 # ---------- UTILITIES ----------
 def rate_limited_request(fn):
@@ -455,8 +448,7 @@ def multiple_search():
 
 ...
 @app.route('/search', methods=['POST'])
-def search():
-    global progress
+def search():    
     term1_query = request.form['term1']
     term2_query = request.form['term2']
     date_from = request.form.get('date_from')
@@ -475,27 +467,30 @@ def search():
             variants = find_combined_variants(term1_query, term2_query, date_from, date_to, exclude_hyphens)
 
         # Store the search progress in the user-specific dictionary
-        user_progress[session['id']] = {
+        sid = session['id']
+        user_progress.hset(f"user:{sid}", mapping={
             'term1_query': term1_query,
             'term2_query': term2_query,
-            'term1_variants': variants['term1'],
-            'term2_variants': variants['term2']
-        }
-
-        
+            'term1_variants': json.dumps(variants['term1']),
+            'term2_variants': json.dumps(variants['term2']),
+            'last_seen': datetime.utcnow().isoformat()
+        })        
 
         return jsonify({"status": "started"})
 
     except Exception as e:
         import traceback
-        user_progress[session['id']] = {
+        sid = session['id']
+        user_progress.hset(f"user:{sid}", mapping={
             'term1_query': term1_query,
             'term2_query': term2_query,
-            'term1_variants': variants['term1'] if 'variants' in locals() else {},
-            'term2_variants': variants['term2'] if 'variants' in locals() else {},
+            'term1_variants': json.dumps(variants['term1'] if 'variants' in locals() else {}),
+            'term2_variants': json.dumps(variants['term2'] if 'variants' in locals() else {}),
             'error': str(e),
-            'trace': traceback.format_exc()
-        }
+            'trace': traceback.format_exc(),
+            'last_seen': datetime.utcnow().isoformat()
+        })        
+
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/search_stream', methods=['GET'])
@@ -503,18 +498,24 @@ def search_stream():
     global progress
 
     def generate():
-        progress = user_progress.get(session['id'])
-        if not progress:
+        sid = session['id']
+        data = user_progress.hgetall(f"user:{sid}")
+        if not data:
             yield "data: No progress found.\n\n"
             yield "data: DONE\n\n"
             return
 
-        yield f"data: Variants for Term 1 ({progress['term1_query']}): {sum(len(v) for v in progress['term1_variants'].values())}\n\n"
-        yield f"data: Variants for Term 2 ({progress['term2_query']}): {sum(len(v) for v in progress['term2_variants'].values())}\n\n"
+        term1_query = data.get('term1_query', '')
+        term2_query = data.get('term2_query', '')
+        term1_variants = json.loads(data.get('term1_variants', '{}'))
+        term2_variants = json.loads(data.get('term2_variants', '{}'))
+
+        yield f"data: Variants for Term 1 ({term1_query}): {sum(len(v) for v in term1_variants.values())}\n\n"
+        yield f"data: Variants for Term 2 ({term2_query}): {sum(len(v) for v in term2_variants.values())}\n\n"
 
         results = {
-            "term1_variants": format_variants_for_display(progress['term1_variants']),
-            "term2_variants": format_variants_for_display(progress['term2_variants'])
+            "term1_variants": format_variants_for_display(term1_variants),
+            "term2_variants": format_variants_for_display(term2_variants)
         }
 
         yield f"data: {json.dumps(results)}\n\n"
@@ -585,7 +586,8 @@ def page_not_found(e):
 @app.route('/precise_progress')
 def precise_progress():
     sid = session.get('id')
-    progress = user_progress.get(sid, {}).get('precise_progress', {})
+    data = user_progress.hget(f"user:{sid}", "precise_progress")
+    progress = json.loads(data) if data else {}
     return jsonify(progress)
 
 if __name__ == '__main__':
